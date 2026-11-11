@@ -24,7 +24,7 @@ if 'messages' not in st.session_state:
   bubble_class = "user-bubble" if msg['role'] == 'user' else "ai-bubble"
   st.markdown(f'<div class="chat-row {row_class}"><div class="bubble {bubble_class}">{msg["content"]}</div></div>', unsafe_allow_html=True)
   if prompt := st.chat_input("Type a message..."):
-  st.session_state.messages.append({'role': 'user', 'content': prompt})
-  st.rerun()
+    st.session_state.messages.append({'role': 'user', 'content': prompt})
+    st.rerun()
   else:
-  st.warning("Please enter your Gemini API Key in the sidebar.")
+    st.warning("Please enter your Gemini API Key in the sidebar.")
