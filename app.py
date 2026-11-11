@@ -17,7 +17,7 @@ if api_key:
   .ai-bubble { background-color: #F1F0F0; color: black; }
   </style>
   """, unsafe_allow_html=True)
-  if 'messages' not in st.session_state:
+if 'messages' not in st.session_state:
   st.session_state.messages = []
   for msg in st.session_state.messages:
   row_class = "user-row" if msg['role'] == 'user' else ""
