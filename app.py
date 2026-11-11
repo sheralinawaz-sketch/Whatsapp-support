@@ -20,7 +20,7 @@ if api_key:
 if 'messages' not in st.session_state:
   st.session_state.messages = []
   for msg in st.session_state.messages:
-row_class = "user-row" if msg['role'] == 'user' else ""
+   row_class = "user-row" if msg['role'] == 'user' else ""
   bubble_class = "user-bubble" if msg['role'] == 'user' else "ai-bubble"
   st.markdown(f'<div class="chat-row {row_class}"><div class="bubble {bubble_class}">{msg["content"]}</div></div>', unsafe_allow_html=True)
   if prompt := st.chat_input("Type a message..."):
