@@ -85,3 +85,26 @@ if api_key:
             for msg in st.session_state.messages:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
+
+            # یوزر سے سوال لینا
+            prompt = st.chat_input("اس چیٹ کے بارے میں کچھ پوچھیں...")
+            if prompt:
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                
+                full_context_prompt = f"یہ واٹس ایپ چیٹ کی مکمل ہسٹری ہے:\n\n{chat_text}\n\nاس ہسٹری کی بنیاد پر میرے اس سوال کا جواب دیں: {prompt}"
+                
+                with st.chat_message("ai"):
+                    try:
+                        response = model.generate_content(full_context_prompt)
+                        st.markdown(response.text)
+                        st.session_state.messages.append({"role": "ai", "content": response.text})
+                    except Exception as e:
+                        st.error(f"جیمنی کی طرف سے کوئی مسئلہ آیا ہے: {e}")
+        else:
+            st.warning("👈 براہ کرم سائیڈ بار سے واٹس ایپ کی ZIP فائل اپلوڈ کریں۔")
+    except Exception as e:
+        st.error(f"API Key میں کوئی مسئلہ ہے یا جیمنی کام نہیں کر رہا: {e}")
+else:
+    st.error("👈 براہ کرم ایپ کو استعمال کرنے کے لیے سائیڈ بار میں اپنی Gemini API Key محفوظ کریں۔")
