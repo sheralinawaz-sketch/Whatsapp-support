@@ -4,7 +4,7 @@ from google.generativeai import configure, GenerativeModel
 st.set_page_config(layout="wide")
 st.sidebar.title("Settings")
 api_key = st.sidebar.text_input("Gemini API Key", type="password")
- if api_key:
+if api_key:
   configure(api_key=api_key)
   model = GenerativeModel('gemini-1.5-flash')
   st.title("WhatsApp-style Chat")
