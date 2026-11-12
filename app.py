@@ -1,11 +1,14 @@
 import os
 import shutil
 import zipfile
+import io
 import streamlit as st
+import requests
+from gtts import gTTS
 
 # Platform Limits & Configuration Constants
-STREAMLIT_MAX_FILE_SIZE_MB = 200  # Default server maxUploadSize in Streamlit config
-CHUNK_SIZE_BYTES = 1024 * 1024    # 1MB chunk size for controlled buffer writing
+STREAMLIT_MAX_FILE_SIZE_MB = 200
+CHUNK_SIZE_BYTES = 1024 * 1024
 STORAGE_BASE_DIR = "stored_contacts"
 
 st.set_page_config(
@@ -24,6 +27,13 @@ if "collective_selected" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = {}
 
+def check_connection(url="https://httpbin.org/status/200"):
+    try:
+        response = requests.get(url, timeout=5)
+        return response.status_code == 200
+    except Exception:
+        return False
+
 def get_contact_folder(contact_name: str) -> str:
     path = os.path.join(STORAGE_BASE_DIR, contact_name)
     os.makedirs(path, exist_ok=True)
@@ -34,10 +44,7 @@ def save_uploaded_file_chunked(uploaded_file, target_dir: str):
     filename = uploaded_file.name
 
     if file_size_mb > STREAMLIT_MAX_FILE_SIZE_MB:
-        st.error(
-            f"Limit Exceeded: `{filename}` is {file_size_mb:.2f} MB. "
-            f"Streamlit Community Cloud allows up to {STREAMLIT_MAX_FILE_SIZE_MB} MB per file."
-        )
+        st.error(f"Limit Exceeded: `{filename}` is {file_size_mb:.2f} MB.")
         return False
 
     dest_path = os.path.join(target_dir, filename)
@@ -58,49 +65,45 @@ def save_uploaded_file_chunked(uploaded_file, target_dir: str):
                 bytes_written += len(chunk)
                 progress = min(int((bytes_written / total_bytes) * 100), 100)
                 progress_bar.progress(progress)
-                status_text.text(f"Writing {filename}: {progress}% ({bytes_written / (1024*1024):.1f}/{file_size_mb:.1f} MB)")
+                status_text.text(f"Writing {filename}: {progress}%")
 
         progress_bar.empty()
         status_text.empty()
 
-        # Handle zip extraction automatically if archive uploaded
         if filename.lower().endswith(".zip"):
-            extract_status = st.info(f"Extracting archive `{filename}`...")
+            extract_status = st.info(f"Extracting `{filename}`...")
             try:
                 with zipfile.ZipFile(dest_path, "r") as zip_ref:
                     zip_ref.extractall(target_dir)
                 os.remove(dest_path)
                 extract_status.empty()
-                st.success(f"Extracted and saved contents of `{filename}` successfully.")
+                st.success(f"Extracted `{filename}` successfully.")
             except zipfile.BadZipFile:
                 extract_status.empty()
-                st.error(f"Corruption Error: `{filename}` is not a valid or complete ZIP archive.")
+                st.error(f"Corruption Error: `{filename}` is not a valid ZIP.")
                 if os.path.exists(dest_path):
                     os.remove(dest_path)
                 return False
         else:
-            st.success(f"Saved `{filename}` ({file_size_mb:.2f} MB) to persistent storage.")
-
+            st.success(f"Saved `{filename}` to persistent storage.")
         return True
 
-    except PermissionError:
-        progress_bar.empty()
-        status_text.empty()
-        st.error(f"Filesystem Error: Insufficient permissions to write `{filename}` to storage.")
-        return False
-    except OSError as e:
-        progress_bar.empty()
-        status_text.empty()
-        st.error(f"Storage Exhaustion/OS Error: {str(e)}. Free platform disk space may be depleted.")
-        return False
     except Exception as e:
         progress_bar.empty()
         status_text.empty()
-        st.error(f"Processing Error on `{filename}`: {type(e).__name__} - {str(e)}")
+        st.error(f"Processing Error: {str(e)}")
         return False
 
-# Sidebar: Contacts Navigation & Management
+# Sidebar: Contacts & Persistent Connection Status
 with st.sidebar:
+    st.header("System Status")
+    is_connected = check_connection()
+    if is_connected:
+        st.success("☁️ Cloud Connection: Online", icon="✅")
+    else:
+        st.error("⚠️ Cloud Connection: Interrupted", icon="❌")
+
+    st.markdown("---")
     st.header("Contacts")
     selected = st.radio(
         "Select Workspace:",
@@ -117,8 +120,6 @@ with st.sidebar:
             st.session_state.contacts.append(clean_name)
             get_contact_folder(clean_name)
             st.rerun()
-        elif clean_name in st.session_state.contacts:
-            st.warning(f"Contact '{clean_name}' already exists.")
 
 # Split Layout
 col_collective, col_workspace = st.columns([1, 1], gap="large")
@@ -126,31 +127,18 @@ col_collective, col_workspace = st.columns([1, 1], gap="large")
 # Left Column: Collective Workspace
 with col_collective:
     st.markdown("## 🌐 Collective Workspace")
-    st.caption("Cross-contact queries and global intelligence")
-
     st.session_state.collective_selected = st.multiselect(
         "Contacts to analyze simultaneously:",
         options=st.session_state.contacts,
         default=[c for c in st.session_state.collective_selected if c in st.session_state.contacts]
     )
-
-    collective_prompt = st.text_area(
-        "Collective Analysis Prompt:",
-        placeholder="Identify common themes across selected contacts...",
-        height=140
-    )
+    collective_prompt = st.text_area("Collective Analysis Prompt:", height=140)
 
     if st.button("Run Multi-Contact Analysis"):
-        if not st.session_state.collective_selected:
-            st.error("Platform Error: Select at least one contact for collective analysis.")
-        elif not collective_prompt.strip():
-            st.error("Platform Error: Prompt cannot be empty.")
+        if not st.session_state.collective_selected or not collective_prompt.strip():
+            st.error("Select contacts and enter a prompt.")
         else:
-            total_files = 0
-            for c in st.session_state.collective_selected:
-                folder = get_contact_folder(c)
-                total_files += len([f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))])
-            st.info(f"Analyzing {len(st.session_state.collective_selected)} contacts ({total_files} stored files aggregated)...")
+            st.info("Aggregating workspace files for analysis...")
 
 # Right Column: Dedicated Workspace
 with col_workspace:
@@ -158,61 +146,62 @@ with col_workspace:
     contact_dir = get_contact_folder(active_contact)
 
     st.markdown(f"## 👤 Workspace: {active_contact}")
-    st.caption("Persistent local storage—operates independently of network state.")
-
-    st.markdown(f"**Upload WhatsApp export files for {active_contact}**")
     uploaded_files = st.file_uploader(
         f"Upload files for {active_contact}",
         type=["zip", "txt", "jpg", "png", "mp4", "opus", "oga"],
         accept_multiple_files=True,
-        key=f"uploader_{active_contact}",
-        label_visibility="collapsed"
+        key=f"uploader_{active_contact}"
     )
 
     if uploaded_files:
         upload_success_flag = False
         for up_file in uploaded_files:
             file_path = os.path.join(contact_dir, up_file.name)
-            # Avoid re-saving files that already exist identically
             if not os.path.exists(file_path):
                 if save_uploaded_file_chunked(up_file, contact_dir):
                     upload_success_flag = True
         if upload_success_flag:
             st.rerun()
 
-    st.caption(f"Max payload: {STREAMLIT_MAX_FILE_SIZE_MB}MB per file • ZIP, TXT, JPG, PNG, MP4, OPUS, OGA")
-
-    # Stored Files Display
     stored_files = [f for f in os.listdir(contact_dir) if os.path.isfile(os.path.join(contact_dir, f))]
-    with st.expander(f"📁 Stored Files for {active_contact} ({len(stored_files)})", expanded=False):
-        if stored_files:
-            for sf in stored_files:
-                f_size_kb = os.path.getsize(os.path.join(contact_dir, sf)) / 1024
-                c_name, c_del = st.columns([4, 1])
-                c_name.text(f"• {sf} ({f_size_kb:.1f} KB)")
-                if c_del.button("Delete", key=f"del_{active_contact}_{sf}"):
-                    os.remove(os.path.join(contact_dir, sf))
-                    st.rerun()
-        else:
-            st.write("No files stored yet.")
+    with st.expander(f"📁 Stored Files ({len(stored_files)})"):
+        for sf in stored_files:
+            c_name, c_del = st.columns([4, 1])
+            c_name.text(f"• {sf}")
+            if c_del.button("Delete", key=f"del_{active_contact}_{sf}"):
+                os.remove(os.path.join(contact_dir, sf))
+                st.rerun()
 
     st.markdown("---")
-    st.markdown(f"### 💬 Simulated Interaction: {active_contact}")
-    sim_prompt = st.text_area(f"Input prompt for {active_contact}:", height=100, key=f"sim_input_{active_contact}")
+    st.markdown(f"### 💬 Interaction: {active_contact}")
+    
+    # Text Input
+    sim_prompt = st.text_area("Input prompt for text reply:", height=100)
+    if st.button(f"Send Text to {active_contact}") and sim_prompt.strip():
+        if active_contact not in st.session_state.chat_history:
+            st.session_state.chat_history[active_contact] = []
+        response_text = f"Simulated response for {active_contact} referencing {len(stored_files)} files."
+        st.session_state.chat_history[active_contact].append({"role": "user", "text": sim_prompt})
+        st.session_state.chat_history[active_contact].append({"role": "assistant", "text": response_text})
 
-    if st.button(f"Send to {active_contact}"):
-        if not sim_prompt.strip():
-            st.error("Input Error: Prompt cannot be empty.")
-        else:
-            if active_contact not in st.session_state.chat_history:
-                st.session_state.chat_history[active_contact] = []
-            st.session_state.chat_history[active_contact].append({"role": "user", "text": sim_prompt})
-            st.session_state.chat_history[active_contact].append(
-                {"role": "assistant", "text": f"Simulated response referencing {len(stored_files)} files in {active_contact}'s storage."}
-            )
+    # Voice Input
+    voice_input = st.audio_input("Record voice prompt:")
+    if voice_input:
+        if active_contact not in st.session_state.chat_history:
+            st.session_state.chat_history[active_contact] = []
+        voice_response = f"Processed voice input for {active_contact}."
+        st.session_state.chat_history[active_contact].append({"role": "user", "text": "[Audio Prompt]"})
+        st.session_state.chat_history[active_contact].append({"role": "assistant", "text": voice_response})
 
-    # Render Chat History
+    # Render Chat History with Audio Output capability
     if active_contact in st.session_state.chat_history:
-        for msg in reversed(st.session_state.chat_history[active_contact]):
+        for msg_idx, msg in enumerate(reversed(st.session_state.chat_history[active_contact])):
             prefix = "User" if msg["role"] == "user" else active_contact
             st.write(f"**{prefix}:** {msg['text']}")
+            
+            if msg["role"] == "assistant":
+                tts_buffer = io.BytesIO()
+                tts = gTTS(text=msg['text'], lang='en')
+                tts.write_to_fp(tts_buffer)
+                tts_buffer.seek(0)
+                st.audio(tts_buffer, format='audio/mp3', key=f"audio_{active_contact}_{msg_idx}")
